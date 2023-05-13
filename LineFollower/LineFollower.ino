@@ -1,25 +1,24 @@
-#define EN_L_PIN 5
-#define IN4_L_PIN 3
-#define IN3_L_PIN 4
-#define IN2_P_PIN 8
-#define IN1_P_PIN 9
-#define EN_P_PIN 6
+#include "maneuvers.h"
+#include "path_planning.h"
+#include "inputs.h"
 
-#define SENS_L_2 A5
-#define SENS_L_1 A4
-#define SENS_P_1 A3
-#define SENS_P_2 A2
+uint8_t current_position_node_id = 0;
+uint8_t current_node_enter_direction = 1;
 
-#define SPEED 210
-#define TURN_SPEED 190
+Robot_State robot_state = STAND_BY;
 
-#define FILTER_STR 100
-#define FILTER_STR_2 100
+Maneuver maneuverList[MAX_PATH_SIZE] = {GO_STRAIGHT, TURN_RIGHT, TURN_LEFT, REVERSE, TURN_RIGHT, TURN_LEFT, GO_STRAIGHT, STOP};
+uint8_t programCounter = 0;
 
-enum Maneuver{TURN_LEFT, TURN_RIGHT, STOP, GO_STRAIGHT, REVERSE};
-Maneuver maneuverList[] = {GO_STRAIGHT, TURN_RIGHT, TURN_LEFT, REVERSE, TURN_RIGHT, TURN_LEFT, GO_STRAIGHT, STOP};
-bool stoped = false;
-static int filteredCounters[4] = {0,0,0,0};
+  Node_data mapa[] = {{0,{-1,-1,-1,1},{0,0,0,10}},
+                      {1,{-1,0,2,4},{0,10,10,10}},
+                      {2,{1,-1,-1,3},{10,0,0,10}},
+                      {3,{4,2,-1,-1},{10,10,0,0}},
+                      {4,{5,1,3,-1},{20,10,10,0}},
+                      {5,{-1,-1,4,6},{0,0,20,30}},
+                      {6,{-1,5,8,7},{0,30,25,30}},
+                      {7,{-1,6,-1,-1},{0,30,0,0}},
+                      {8,{6,-1,-1,-1},{25,0,0,0}}};
 
 void setup() {
   pinMode(EN_L_PIN, OUTPUT);
@@ -41,147 +40,93 @@ void setup() {
   pinMode(SENS_P_1, INPUT);
   pinMode(SENS_P_2, INPUT);
 
-  //----------------------------------------------
+  pinMode(BUTTON_START_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_STOP_PIN, INPUT_PULLUP);
 
-  digitalWrite(IN3_L_PIN, HIGH);
-  digitalWrite(IN1_P_PIN, HIGH);
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  set_direction_right(FORW);
+  set_direction_left(FORW);
+  set_speed_right(0);
+  set_speed_left(0);
+
+  /*uint8_t sizew = 0;
+  uint8_t path[8];
+  sizew = findNodePath(current_position_node_id, current_selected_option(), mapa, path);
+  Maneuver lista[10];
+  generateManeuverList(path, sizew, mapa, maneuverList, 3);
+  maneuverList[sizew-1] = STOP;
+
+  //delay(5000);*/
+  //Serial.begin(9600);
 }
 
-void readFiltered(){
-  if(digitalRead(SENS_L_2) == 0) filteredCounters[0]++;
-  else filteredCounters[0] = 0;
-  if(digitalRead(SENS_L_1) == 0) filteredCounters[1]++;
-  else filteredCounters[1] = 0;
-  if(digitalRead(SENS_P_1) == 0) filteredCounters[2]++;
-  else filteredCounters[2] = 0;
-  if(digitalRead(SENS_P_2) == 0) filteredCounters[3]++;
-  else filteredCounters[3] = 0;
-}
+void robot_stand_by_mode(){
+  if(start_is_pressed_for_time()){
+    wait_until_start_released();
 
-void setMotorsForward(){
-  digitalWrite(IN3_L_PIN, HIGH);
-  digitalWrite(IN1_P_PIN, HIGH);
-  digitalWrite(IN4_L_PIN, LOW);
-  digitalWrite(IN2_P_PIN, LOW);
-}
-
-void setMotorsBackward(){
-  digitalWrite(IN3_L_PIN, LOW);
-  digitalWrite(IN1_P_PIN, LOW);
-  digitalWrite(IN4_L_PIN, HIGH);
-  digitalWrite(IN2_P_PIN, HIGH);
-}
-void goStraight(){
-  setMotorsForward();
-  analogWrite(EN_L_PIN, TURN_SPEED);
-  analogWrite(EN_P_PIN, TURN_SPEED);
-  delay(350);
-  analogWrite(EN_L_PIN, 0);
-  analogWrite(EN_P_PIN, 0);
-}
-
-void turnLeft_90(){
-  setMotorsForward();
-  analogWrite(EN_L_PIN, 0);
-  analogWrite(EN_P_PIN, TURN_SPEED);
-  delay(300);
-  int val1 = 0;
-  while(val1 < FILTER_STR_2){
-    if(digitalRead(SENS_P_1) == 0) val1++;
-    else val1 = 0;
+    uint8_t picked_goal_node_id = pot_option_to_node_id(current_selected_option());
+    uint8_t path_size;
+    uint8_t path[MAX_PATH_SIZE];
+    uint8_t end_direction_result;
+    
+    path_size = findNodePath(current_position_node_id, picked_goal_node_id, mapa, path);
+    
+    generateManeuverList(path, path_size, mapa, maneuverList, current_node_enter_direction, &end_direction_result);
+    maneuverList[path_size - 1] = STOP;
+    programCounter = 0;
+    robot_state = EXECUTING_PATH;
+    
+    current_position_node_id = picked_goal_node_id;
+    current_node_enter_direction = end_direction_result;
   }
-  analogWrite(EN_P_PIN, 0);
-}
-
-void turnRight_90(){
-  setMotorsForward();
-  analogWrite(EN_P_PIN, 0);
-  analogWrite(EN_L_PIN, TURN_SPEED);
-  delay(300);
-  int val1 = 0;
-  while(val1 < FILTER_STR_2){
-    if(digitalRead(SENS_L_1) == 0) val1++;
-    else val1 = 0;
-  }
-  analogWrite(EN_L_PIN, 0);
-}
-
-void stop_robot(){
-  analogWrite(EN_P_PIN, 0);
-  analogWrite(EN_L_PIN, 0);
-  stoped = true;
-}
-
-void reverse(){
-  setMotorsBackward();
-  analogWrite(EN_P_PIN, TURN_SPEED);
-  analogWrite(EN_L_PIN, 0);
-  delay(1700);
-  setMotorsForward();
-  analogWrite(EN_P_PIN, 0);
-  analogWrite(EN_L_PIN, TURN_SPEED);
-  int val1 = 0;
-  while(val1 < FILTER_STR_2){
-    if(digitalRead(SENS_L_1) == 0) val1++;
-    else val1 = 0;
-  }
-  analogWrite(EN_L_PIN, 0);
-  analogWrite(EN_P_PIN, TURN_SPEED);
-  val1 = 0;
-  while(val1 < FILTER_STR_2){
-    if(digitalRead(SENS_P_1) == 0) val1++;
-    else val1 = 0;
-  }
-  analogWrite(EN_P_PIN, 0);
-}
-
-void executeManeuver(Maneuver maneuver){
-  switch(maneuver){
-    case Maneuver::TURN_LEFT:
-      turnLeft_90();
-      break;
-    case Maneuver::TURN_RIGHT:
-      turnRight_90();
-      break;
-    case Maneuver::GO_STRAIGHT:
-      goStraight();
-      break;
-    case Maneuver::STOP:
-      stop_robot();
-      break;
-    case Maneuver::REVERSE:
-      reverse();
-      break;
+  if(stop_is_pressed_for_time()){
+    wait_until_stop_released();
+    current_position_node_id =  pot_option_to_node_id(current_selected_option());
+    current_node_enter_direction = 1;
   }
 }
 
-int currentManuverIndex = 0;
-
-void loop() {  
-  readFiltered();
-  if(stoped) return;
-  
-  if(digitalRead(SENS_L_1) == 0){
-    analogWrite(EN_L_PIN, 0);
-    analogWrite(EN_P_PIN, SPEED);
+void robot_execute_path_mode(){    
+  if(sensor_left_1()){
+    set_speed_right(SPEED + OFFSET);
+    set_speed_left(0);
   }
-  else if(digitalRead(SENS_P_1) == 0){
-    analogWrite(EN_L_PIN, SPEED);
-    analogWrite(EN_P_PIN, 0);
+  else if(sensor_right_1()){
+    set_speed_right(0);
+    set_speed_left(SPEED);
   }
   else{
-    analogWrite(EN_P_PIN, SPEED);
-    analogWrite(EN_L_PIN, SPEED);
+    set_speed_right(SPEED + OFFSET);
+    set_speed_left(SPEED);
   }
 
-  /*if(digitalRead(SENS_L_1) == 0 && digitalRead(SENS_L_2) == 0 &&
-     digitalRead(SENS_P_1) == 0 && digitalRead(SENS_P_2) == 0){
-     executeManeuver(maneuverList[currentManuverIndex++]);*/
+  if(node_detected()){
+    if(maneuverList[programCounter] == GO_STRAIGHT) go_straight();
+    else if(maneuverList[programCounter] == TURN_RIGHT) turn_right_90();
+    else if(maneuverList[programCounter] == TURN_LEFT) turn_left_90();
+    else if(maneuverList[programCounter] == REVERSE) reverse();
+    else {
+      stop_at_node();
+      robot_state = STAND_BY;
+    }
+    programCounter++;
+  }  
 
-  if(filteredCounters[0] > FILTER_STR &&
-     filteredCounters[1] > FILTER_STR &&
-     filteredCounters[2] > FILTER_STR &&
-     filteredCounters[3] > FILTER_STR){
-      executeManeuver(maneuverList[currentManuverIndex++]);
+  if(stop_is_pressed()){
+    set_speed_right(0);
+    set_speed_left(0);
+    robot_state = STAND_BY;
+  }
+}
+
+void loop() {
+  if(robot_state == STAND_BY){
+    digitalWrite(LED_BUILTIN, LOW);
+    robot_stand_by_mode();
+  }
+  else{
+    digitalWrite(LED_BUILTIN, HIGH);
+    robot_execute_path_mode();
   }
 }
